@@ -3,17 +3,22 @@
 PyQt6 图形界面实现
 """
 
+import platform
+
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QPushButton, QGroupBox, QLineEdit,
     QSlider, QSpinBox, QTextEdit, QProgressBar,
-    QFrame, QGridLayout, QMessageBox
+    QFrame, QGridLayout, QMessageBox, QComboBox
 )
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QObject
 from PyQt6.QtGui import QFont, QKeySequence, QShortcut
 
 from ..core.fishing_bot import FishingBot, FishingState, FishingStats
+from ..core.sound_detector import SoundDetector
 from ..utils.config import Config
+
+IS_MACOS = platform.system() == "Darwin"
 
 
 class SignalBridge(QObject):
@@ -171,38 +176,50 @@ class MainWindow(QMainWindow):
         group = QGroupBox("参数设置")
         layout = QGridLayout(group)
         
+        # 音频设备选择
+        layout.addWidget(QLabel("音频设备:"), 0, 0)
+        self._device_combo = QComboBox()
+        self._device_combo.setMinimumWidth(200)
+        self._refresh_audio_devices()
+        layout.addWidget(self._device_combo, 0, 1, 1, 2)
+        
+        # 刷新设备按钮
+        refresh_btn = QPushButton("刷新")
+        refresh_btn.clicked.connect(self._refresh_audio_devices)
+        layout.addWidget(refresh_btn, 0, 3)
+        
         # 声音灵敏度
-        layout.addWidget(QLabel("声音灵敏度:"), 0, 0)
+        layout.addWidget(QLabel("声音灵敏度:"), 1, 0)
         self._sensitivity_slider = QSlider(Qt.Orientation.Horizontal)
         self._sensitivity_slider.setRange(0, 100)
         self._sensitivity_slider.setValue(self._config.sound_sensitivity)
         self._sensitivity_slider.valueChanged.connect(self._on_sensitivity_changed)
-        layout.addWidget(self._sensitivity_slider, 0, 1)
+        layout.addWidget(self._sensitivity_slider, 1, 1)
         self._sensitivity_label = QLabel(f"{self._config.sound_sensitivity}%")
         self._sensitivity_label.setMinimumWidth(40)
-        layout.addWidget(self._sensitivity_label, 0, 2)
+        layout.addWidget(self._sensitivity_label, 1, 2)
         
         # 校准按钮
         self._calibrate_btn = QPushButton("校准")
         self._calibrate_btn.clicked.connect(self._on_calibrate)
-        layout.addWidget(self._calibrate_btn, 0, 3)
+        layout.addWidget(self._calibrate_btn, 1, 3)
         
         # 上饵间隔
-        layout.addWidget(QLabel("上饵间隔 (分钟):"), 1, 0)
+        layout.addWidget(QLabel("上饵间隔 (分钟):"), 2, 0)
         self._bait_interval_spin = QSpinBox()
         self._bait_interval_spin.setRange(1, 60)
         self._bait_interval_spin.setValue(self._config.bait_interval // 60)
-        layout.addWidget(self._bait_interval_spin, 1, 1)
+        layout.addWidget(self._bait_interval_spin, 2, 1)
         
         # 超时时间
-        layout.addWidget(QLabel("超时时间 (秒):"), 1, 2)
+        layout.addWidget(QLabel("超时时间 (秒):"), 2, 2)
         self._timeout_spin = QSpinBox()
         self._timeout_spin.setRange(5, 60)
         self._timeout_spin.setValue(self._config.timeout)
-        layout.addWidget(self._timeout_spin, 1, 3)
+        layout.addWidget(self._timeout_spin, 2, 3)
         
         # 收杆延迟
-        layout.addWidget(QLabel("收杆延迟 (毫秒):"), 2, 0)
+        layout.addWidget(QLabel("收杆延迟 (毫秒):"), 3, 0)
         delay_layout = QHBoxLayout()
         self._hook_delay_min = QSpinBox()
         self._hook_delay_min.setRange(0, 2000)
@@ -213,10 +230,10 @@ class MainWindow(QMainWindow):
         self._hook_delay_max.setRange(0, 2000)
         self._hook_delay_max.setValue(self._config.hook_delay_max)
         delay_layout.addWidget(self._hook_delay_max)
-        layout.addLayout(delay_layout, 2, 1)
+        layout.addLayout(delay_layout, 3, 1)
         
         # 抛竿延迟
-        layout.addWidget(QLabel("抛竿延迟 (毫秒):"), 2, 2)
+        layout.addWidget(QLabel("抛竿延迟 (毫秒):"), 3, 2)
         cast_delay_layout = QHBoxLayout()
         self._cast_delay_min = QSpinBox()
         self._cast_delay_min.setRange(0, 3000)
@@ -227,9 +244,41 @@ class MainWindow(QMainWindow):
         self._cast_delay_max.setRange(0, 3000)
         self._cast_delay_max.setValue(self._config.cast_delay_max)
         cast_delay_layout.addWidget(self._cast_delay_max)
-        layout.addLayout(cast_delay_layout, 2, 3)
+        layout.addLayout(cast_delay_layout, 3, 3)
+        
+        # macOS 提示
+        if IS_MACOS:
+            hint = QLabel("提示: macOS 需要安装 BlackHole 并配置多输出设备来捕获游戏声音")
+            hint.setStyleSheet("color: #f0ad4e; font-size: 11px;")
+            hint.setWordWrap(True)
+            layout.addWidget(hint, 4, 0, 1, 4)
         
         return group
+    
+    def _refresh_audio_devices(self) -> None:
+        """刷新音频设备列表"""
+        self._device_combo.clear()
+        
+        devices = SoundDetector.get_audio_devices()
+        recommended_idx, _ = SoundDetector.get_recommended_device()
+        
+        selected_index = 0
+        for i, device in enumerate(devices):
+            # 标记推荐设备和虚拟设备
+            name = device['name']
+            if device.get('is_virtual'):
+                name = f"★ {name}"
+            
+            self._device_combo.addItem(name, device['index'])
+            
+            # 选中推荐设备
+            if device['index'] == recommended_idx:
+                selected_index = i
+        
+        if devices:
+            self._device_combo.setCurrentIndex(selected_index)
+        else:
+            self._device_combo.addItem("未找到音频设备", None)
     
     def _create_control_group(self) -> QGroupBox:
         """创建控制按钮组"""
@@ -367,6 +416,11 @@ class MainWindow(QMainWindow):
         self._config.cast_delay_min = self._cast_delay_min.value()
         self._config.cast_delay_max = self._cast_delay_max.value()
         
+        # 设置音频设备
+        device_index = self._device_combo.currentData()
+        device_name = self._device_combo.currentText()
+        self._bot.sound_detector.set_device(device_index, device_name)
+        
         self._bot.set_config(self._config)
     
     def _on_start_stop(self) -> None:
@@ -393,7 +447,25 @@ class MainWindow(QMainWindow):
                 self._pause_btn.setEnabled(True)
                 self._volume_timer.start(100)
             else:
-                QMessageBox.warning(self, "错误", "启动失败，请检查声音设备")
+                if IS_MACOS:
+                    QMessageBox.warning(
+                        self, 
+                        "启动失败", 
+                        "无法启动声音检测。\n\n"
+                        "macOS 需要安装虚拟音频设备来捕获系统声音：\n"
+                        "1. 安装 BlackHole (推荐): brew install blackhole-2ch\n"
+                        "2. 打开「音频 MIDI 设置」\n"
+                        "3. 创建「多输出设备」，包含扬声器和 BlackHole\n"
+                        "4. 将多输出设备设为系统输出\n"
+                        "5. 在本程序中选择 BlackHole 作为输入设备"
+                    )
+                else:
+                    QMessageBox.warning(
+                        self, 
+                        "启动失败", 
+                        "无法启动声音检测。\n\n"
+                        "请检查是否启用了「立体声混音」设备。"
+                    )
     
     def _on_pause(self) -> None:
         """暂停按钮点击"""

@@ -1,8 +1,10 @@
 """
 声音检测模块
 使用 sounddevice 监听系统音频输出，检测鱼上钩的声音
+支持 Windows (WASAPI Loopback) 和 macOS (BlackHole/Soundflower)
 """
 
+import platform
 import threading
 import time
 from typing import Callable, Optional, List
@@ -15,8 +17,31 @@ except ImportError:
     print("警告: sounddevice 未安装，声音检测功能将不可用")
 
 
+# 系统类型
+IS_MACOS = platform.system() == "Darwin"
+IS_WINDOWS = platform.system() == "Windows"
+
+
 class SoundDetector:
     """声音检测器"""
+    
+    # macOS 常见虚拟音频设备关键词
+    MACOS_VIRTUAL_DEVICES = [
+        'blackhole',
+        'soundflower',
+        'loopback',
+        'virtual',
+        'multi-output',
+    ]
+    
+    # Windows 常见 loopback 设备关键词
+    WINDOWS_LOOPBACK_DEVICES = [
+        'loopback',
+        'stereo mix',
+        'what u hear',
+        '立体声混音',
+        'wave out',
+    ]
     
     def __init__(
         self,
@@ -57,6 +82,7 @@ class SoundDetector:
         
         # 音频设备
         self._device_index: Optional[int] = None
+        self._device_name: str = ""
     
     @property
     def threshold(self) -> float:
@@ -107,7 +133,8 @@ class SoundDetector:
                         'index': i,
                         'name': device['name'],
                         'channels': device['max_input_channels'],
-                        'sample_rate': device['default_samplerate']
+                        'sample_rate': device['default_samplerate'],
+                        'is_virtual': SoundDetector._is_virtual_device(device['name'])
                     })
         except Exception as e:
             print(f"获取音频设备失败: {e}")
@@ -115,35 +142,79 @@ class SoundDetector:
         return devices
     
     @staticmethod
-    def get_loopback_device() -> Optional[int]:
+    def _is_virtual_device(name: str) -> bool:
+        """检查是否为虚拟音频设备"""
+        name_lower = name.lower()
+        
+        if IS_MACOS:
+            return any(kw in name_lower for kw in SoundDetector.MACOS_VIRTUAL_DEVICES)
+        elif IS_WINDOWS:
+            return any(kw in name_lower for kw in SoundDetector.WINDOWS_LOOPBACK_DEVICES)
+        
+        return False
+    
+    @staticmethod
+    def get_loopback_device() -> tuple[Optional[int], str]:
         """
-        获取系统音频回环设备（WASAPI loopback）
+        获取系统音频回环设备
+        Windows: WASAPI loopback
+        macOS: BlackHole/Soundflower 等虚拟音频设备
         
         Returns:
-            设备索引，未找到返回 None
+            (设备索引, 设备名称)，未找到返回 (None, "")
         """
         if sd is None:
-            return None
+            return None, ""
         
         try:
             devices = sd.query_devices()
+            
+            # 根据平台选择关键词
+            if IS_MACOS:
+                keywords = SoundDetector.MACOS_VIRTUAL_DEVICES
+            else:
+                keywords = SoundDetector.WINDOWS_LOOPBACK_DEVICES
+            
             for i, device in enumerate(devices):
                 name = device['name'].lower()
-                # Windows WASAPI loopback 设备通常包含这些关键词
-                if ('loopback' in name or 
-                    'stereo mix' in name or 
-                    'what u hear' in name or
-                    '立体声混音' in name):
-                    if device['max_input_channels'] > 0:
-                        return i
+                if device['max_input_channels'] > 0:
+                    for keyword in keywords:
+                        if keyword in name:
+                            return i, device['name']
         except Exception as e:
             print(f"查找 loopback 设备失败: {e}")
         
-        return None
+        return None, ""
     
-    def set_device(self, device_index: Optional[int]) -> None:
+    @staticmethod
+    def get_recommended_device() -> tuple[Optional[int], str]:
+        """
+        获取推荐的音频输入设备
+        优先返回虚拟音频设备，否则返回默认输入设备
+        
+        Returns:
+            (设备索引, 设备名称)
+        """
+        # 先尝试找虚拟设备
+        device_idx, device_name = SoundDetector.get_loopback_device()
+        if device_idx is not None:
+            return device_idx, device_name
+        
+        # 没找到就用默认输入设备
+        if sd is not None:
+            try:
+                default = sd.query_devices(kind='input')
+                if default:
+                    return default['index'], default['name']
+            except Exception:
+                pass
+        
+        return None, ""
+    
+    def set_device(self, device_index: Optional[int], device_name: str = "") -> None:
         """设置音频设备"""
         self._device_index = device_index
+        self._device_name = device_name
     
     def _audio_callback(self, indata: np.ndarray, frames: int, time_info, status) -> None:
         """
@@ -193,10 +264,20 @@ class SoundDetector:
             return True
         
         try:
-            # 尝试使用 loopback 设备
+            # 确定使用的设备
             device = self._device_index
+            device_name = self._device_name
+            
             if device is None:
-                device = self.get_loopback_device()
+                device, device_name = self.get_recommended_device()
+            
+            if device is None:
+                print("未找到可用的音频输入设备")
+                if IS_MACOS:
+                    print("提示: macOS 需要安装 BlackHole 等虚拟音频设备来捕获系统声音")
+                else:
+                    print("提示: Windows 需要启用立体声混音 (Stereo Mix)")
+                return False
             
             self._stream = sd.InputStream(
                 device=device,
@@ -207,10 +288,14 @@ class SoundDetector:
             )
             self._stream.start()
             self._running = True
-            print(f"声音检测已启动，设备: {device}")
+            self._device_index = device
+            self._device_name = device_name
+            print(f"声音检测已启动，设备: {device_name} (索引: {device})")
             return True
         except Exception as e:
             print(f"启动声音检测失败: {e}")
+            if IS_MACOS:
+                print("提示: 请确保已安装 BlackHole 并在系统偏好设置中正确配置")
             return False
     
     def stop(self) -> None:
