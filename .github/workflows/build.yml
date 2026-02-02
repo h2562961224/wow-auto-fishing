@@ -20,7 +20,7 @@ jobs:
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
-        python-version: '3.11'
+        python-version: '3.10'
     
     - name: Install dependencies
       run: |
@@ -28,21 +28,54 @@ jobs:
         pip install -r requirements.txt
         pip install pyinstaller
     
-    - name: Build EXE
+    - name: Build EXE (single file)
       run: |
-        pyinstaller --name "WoW自动钓鱼" --onefile --windowed --icon=icon.ico main.py
-      continue-on-error: true
+        pyinstaller --name "WoW自动钓鱼" `
+          --onefile `
+          --windowed `
+          --collect-all sounddevice `
+          --collect-all numpy `
+          --hidden-import pynput.keyboard._win32 `
+          --hidden-import pynput.mouse._win32 `
+          --hidden-import numpy `
+          --hidden-import sounddevice `
+          --hidden-import _sounddevice_data `
+          main.py
     
-    - name: Build EXE (without icon)
-      if: failure()
-      run: |
-        pyinstaller --name "WoW自动钓鱼" --onefile --windowed main.py
-    
-    - name: Upload artifact
+    - name: Upload single file EXE
       uses: actions/upload-artifact@v4
       with:
-        name: WoW-AutoFishing-Windows
+        name: WoW-AutoFishing-Windows-单文件版
         path: dist/*.exe
+        retention-days: 30
+    
+    - name: Clean build
+      run: |
+        Remove-Item -Recurse -Force dist, build
+    
+    - name: Build EXE (folder mode - more compatible)
+      run: |
+        pyinstaller --name "WoW自动钓鱼" `
+          --onedir `
+          --windowed `
+          --collect-all sounddevice `
+          --collect-all numpy `
+          --hidden-import pynput.keyboard._win32 `
+          --hidden-import pynput.mouse._win32 `
+          --hidden-import numpy `
+          --hidden-import sounddevice `
+          --hidden-import _sounddevice_data `
+          main.py
+    
+    - name: Compress folder version
+      run: |
+        Compress-Archive -Path "dist\WoW自动钓鱼\*" -DestinationPath "dist\WoW自动钓鱼-文件夹版.zip"
+    
+    - name: Upload folder version
+      uses: actions/upload-artifact@v4
+      with:
+        name: WoW-AutoFishing-Windows-文件夹版
+        path: dist/*.zip
         retention-days: 30
 
   build-macos:

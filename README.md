@@ -24,9 +24,14 @@
 
 1. 前往 [Releases](../../releases) 或 [Actions](../../actions) 页面
 2. 下载对应系统的可执行文件：
-   - Windows: `WoW自动钓鱼.exe`
+   - Windows 单文件版: `WoW自动钓鱼.exe`（方便，但可能有兼容性问题）
+   - Windows 文件夹版: `WoW自动钓鱼-文件夹版.zip`（更稳定，解压后运行）
    - macOS: `WoW自动钓鱼.app`
 3. 直接运行即可
+
+**Windows 运行报错？** 如果遇到 DLL 相关错误：
+1. 优先尝试「文件夹版」
+2. 安装 [Visual C++ Redistributable](https://aka.ms/vs/17/release/vc_redist.x64.exe)
 
 ### 方式二：从源码运行
 
