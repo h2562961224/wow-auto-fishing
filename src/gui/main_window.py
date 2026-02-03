@@ -17,6 +17,7 @@ from PyQt6.QtGui import QFont, QKeySequence, QShortcut
 from ..core.fishing_bot import FishingBot, FishingState, FishingStats
 from ..core.sound_detector import SoundDetector
 from ..utils.config import Config
+from .volume_graph import VolumeGraph
 
 IS_MACOS = platform.system() == "Darwin"
 
@@ -66,7 +67,7 @@ class MainWindow(QMainWindow):
     def _init_ui(self) -> None:
         """初始化界面"""
         self.setWindowTitle("WoW 自动钓鱼工具")
-        self.setMinimumSize(500, 600)
+        self.setMinimumSize(550, 750)
         
         # 中央控件
         central = QWidget()
@@ -76,6 +77,9 @@ class MainWindow(QMainWindow):
         
         # 状态显示区
         layout.addWidget(self._create_status_group())
+        
+        # 音量波形图
+        layout.addWidget(self._create_volume_graph_group())
         
         # 快捷键设置区
         layout.addWidget(self._create_hotkey_group())
@@ -128,15 +132,59 @@ class MainWindow(QMainWindow):
         self._bait_label = QLabel("0")
         layout.addWidget(self._bait_label, 2, 3)
         
-        # 音量指示器
-        layout.addWidget(QLabel("当前音量:"), 3, 0)
-        self._volume_bar = QProgressBar()
-        self._volume_bar.setRange(0, 100)
-        self._volume_bar.setValue(0)
-        self._volume_bar.setTextVisible(False)
-        layout.addWidget(self._volume_bar, 3, 1, 1, 3)
+        return group
+    
+    def _create_volume_graph_group(self) -> QGroupBox:
+        """创建音量波形图组"""
+        group = QGroupBox("音量波形图（用于调试）")
+        layout = QVBoxLayout(group)
+        
+        # 波形图控件
+        self._volume_graph = VolumeGraph(max_points=300)  # 约30秒数据
+        self._volume_graph.setMinimumHeight(150)
+        layout.addWidget(self._volume_graph)
+        
+        # 控制按钮
+        btn_layout = QHBoxLayout()
+        
+        # 清除按钮
+        clear_btn = QPushButton("清除波形")
+        clear_btn.clicked.connect(self._volume_graph.clear)
+        btn_layout.addWidget(clear_btn)
+        
+        # 测试触发按钮
+        test_btn = QPushButton("模拟触发")
+        test_btn.clicked.connect(self._test_trigger)
+        btn_layout.addWidget(test_btn)
+        
+        # Y轴范围调整
+        btn_layout.addWidget(QLabel("Y轴最大:"))
+        self._y_max_spin = QSpinBox()
+        self._y_max_spin.setRange(1, 1000)
+        self._y_max_spin.setValue(100)
+        self._y_max_spin.setSuffix(" (×0.001)")
+        self._y_max_spin.valueChanged.connect(self._on_y_max_changed)
+        btn_layout.addWidget(self._y_max_spin)
+        
+        # 自动缩放
+        auto_scale_btn = QPushButton("自动缩放")
+        auto_scale_btn.clicked.connect(lambda: self._volume_graph.enable_auto_scale(True))
+        btn_layout.addWidget(auto_scale_btn)
+        
+        btn_layout.addStretch()
+        layout.addLayout(btn_layout)
         
         return group
+    
+    def _test_trigger(self) -> None:
+        """测试触发"""
+        self._volume_graph.mark_trigger()
+        self._log_text.append("[测试] 手动触发标记")
+    
+    def _on_y_max_changed(self, value: int) -> None:
+        """Y轴最大值变化"""
+        self._volume_graph.set_max_volume(value / 1000.0)
+        self._volume_graph.enable_auto_scale(False)
     
     def _create_hotkey_group(self) -> QGroupBox:
         """创建快捷键设置组"""
@@ -521,6 +569,10 @@ class MainWindow(QMainWindow):
             FishingState.PAUSED: "已暂停",
         }
         self._status_label.setText(state_names.get(state, "未知"))
+        
+        # 当检测到声音进入 HOOKING 状态时，在波形图上标记
+        if state == FishingState.HOOKING:
+            self._volume_graph.mark_trigger()
     
     def _on_stats_updated(self, stats: FishingStats) -> None:
         """统计更新回调"""
@@ -539,9 +591,11 @@ class MainWindow(QMainWindow):
     def _update_volume_display(self) -> None:
         """更新音量显示"""
         volume = self._bot.sound_detector.current_volume
-        # 将音量映射到 0-100
-        display_volume = min(100, int(volume * 1000))
-        self._volume_bar.setValue(display_volume)
+        
+        # 更新波形图
+        self._volume_graph.add_volume(volume)
+        self._volume_graph.set_threshold(self._config.sound_threshold)
+        self._volume_graph.set_noise_floor(self._bot.sound_detector._noise_floor)
     
     def _update_time_display(self) -> None:
         """更新运行时间显示"""
