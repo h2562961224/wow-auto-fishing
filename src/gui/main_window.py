@@ -144,37 +144,87 @@ class MainWindow(QMainWindow):
         self._volume_graph.setMinimumHeight(150)
         layout.addWidget(self._volume_graph)
         
-        # 控制按钮
-        btn_layout = QHBoxLayout()
+        # 控制按钮行1
+        btn_layout1 = QHBoxLayout()
+        
+        # 测试音频按钮（重要！）
+        self._test_audio_btn = QPushButton("▶ 开始监听音频")
+        self._test_audio_btn.setStyleSheet("QPushButton { background-color: #2d5a27; }")
+        self._test_audio_btn.clicked.connect(self._on_test_audio)
+        btn_layout1.addWidget(self._test_audio_btn)
         
         # 清除按钮
         clear_btn = QPushButton("清除波形")
         clear_btn.clicked.connect(self._volume_graph.clear)
-        btn_layout.addWidget(clear_btn)
+        btn_layout1.addWidget(clear_btn)
         
-        # 测试触发按钮
+        # 模拟触发按钮
         test_btn = QPushButton("模拟触发")
         test_btn.clicked.connect(self._test_trigger)
-        btn_layout.addWidget(test_btn)
+        btn_layout1.addWidget(test_btn)
+        
+        btn_layout1.addStretch()
+        layout.addLayout(btn_layout1)
+        
+        # 控制按钮行2
+        btn_layout2 = QHBoxLayout()
         
         # Y轴范围调整
-        btn_layout.addWidget(QLabel("Y轴最大:"))
+        btn_layout2.addWidget(QLabel("Y轴最大:"))
         self._y_max_spin = QSpinBox()
         self._y_max_spin.setRange(1, 1000)
         self._y_max_spin.setValue(100)
         self._y_max_spin.setSuffix(" (×0.001)")
         self._y_max_spin.valueChanged.connect(self._on_y_max_changed)
-        btn_layout.addWidget(self._y_max_spin)
+        btn_layout2.addWidget(self._y_max_spin)
         
         # 自动缩放
         auto_scale_btn = QPushButton("自动缩放")
         auto_scale_btn.clicked.connect(lambda: self._volume_graph.enable_auto_scale(True))
-        btn_layout.addWidget(auto_scale_btn)
+        btn_layout2.addWidget(auto_scale_btn)
         
-        btn_layout.addStretch()
-        layout.addLayout(btn_layout)
+        btn_layout2.addStretch()
+        layout.addLayout(btn_layout2)
         
         return group
+    
+    def _on_test_audio(self) -> None:
+        """测试音频按钮点击"""
+        if self._volume_timer.isActive():
+            # 停止监听
+            self._volume_timer.stop()
+            if not self._bot.is_running:
+                self._bot.sound_detector.stop()
+            self._test_audio_btn.setText("▶ 开始监听音频")
+            self._test_audio_btn.setStyleSheet("QPushButton { background-color: #2d5a27; }")
+            self._log_text.append("音频监听已停止")
+        else:
+            # 开始监听
+            self._apply_config_to_bot()
+            
+            # 如果钓鱼没有运行，单独启动声音检测
+            if not self._bot.is_running:
+                if not self._bot.sound_detector.start():
+                    if IS_MACOS:
+                        QMessageBox.warning(
+                            self, 
+                            "音频监听失败", 
+                            "无法启动音频监听。\n\n"
+                            "请确保已选择正确的音频设备。\n"
+                            "macOS 需要安装 BlackHole 等虚拟音频设备。"
+                        )
+                    else:
+                        QMessageBox.warning(
+                            self, 
+                            "音频监听失败", 
+                            "无法启动音频监听，请检查音频设备选择。"
+                        )
+                    return
+            
+            self._volume_timer.start(100)  # 每100ms更新一次
+            self._test_audio_btn.setText("⏹ 停止监听")
+            self._test_audio_btn.setStyleSheet("QPushButton { background-color: #8b2500; }")
+            self._log_text.append("音频监听已开始，观察波形图...")
     
     def _test_trigger(self) -> None:
         """测试触发"""
@@ -478,7 +528,10 @@ class MainWindow(QMainWindow):
             self._start_btn.setText("开始钓鱼")
             self._start_btn.setStyleSheet("")
             self._pause_btn.setEnabled(False)
+            # 停止钓鱼时也停止音频监听和波形显示
             self._volume_timer.stop()
+            self._test_audio_btn.setText("▶ 开始监听音频")
+            self._test_audio_btn.setStyleSheet("QPushButton { background-color: #2d5a27; }")
         else:
             self._apply_config_to_bot()
             if self._bot.start():
@@ -494,6 +547,9 @@ class MainWindow(QMainWindow):
                 """)
                 self._pause_btn.setEnabled(True)
                 self._volume_timer.start(100)
+                # 更新测试音频按钮状态
+                self._test_audio_btn.setText("⏹ 停止监听")
+                self._test_audio_btn.setStyleSheet("QPushButton { background-color: #8b2500; }")
             else:
                 if IS_MACOS:
                     QMessageBox.warning(
