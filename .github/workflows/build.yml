@@ -9,6 +9,10 @@ on:
     branches: [ main ]
   workflow_dispatch:  # 允许手动触发
 
+# 授予 GITHUB_TOKEN 写权限
+permissions:
+  contents: write
+
 jobs:
   build-windows:
     runs-on: windows-latest
