@@ -1,4 +1,4 @@
-name: Build Windows EXE
+name: Build and Release
 
 on:
   push:
@@ -42,6 +42,10 @@ jobs:
           --hidden-import _sounddevice_data `
           main.py
     
+    - name: Rename single file
+      run: |
+        Move-Item "dist\WoW自动钓鱼.exe" "dist\WoW自动钓鱼-Windows-单文件版.exe"
+    
     - name: Upload single file EXE
       uses: actions/upload-artifact@v4
       with:
@@ -51,7 +55,8 @@ jobs:
     
     - name: Clean build
       run: |
-        Remove-Item -Recurse -Force dist, build
+        Remove-Item -Recurse -Force build
+        Remove-Item -Force *.spec
     
     - name: Build EXE (folder mode - more compatible)
       run: |
@@ -69,7 +74,7 @@ jobs:
     
     - name: Compress folder version
       run: |
-        Compress-Archive -Path "dist\WoW自动钓鱼\*" -DestinationPath "dist\WoW自动钓鱼-文件夹版.zip"
+        Compress-Archive -Path "dist\WoW自动钓鱼\*" -DestinationPath "dist\WoW自动钓鱼-Windows-文件夹版.zip"
     
     - name: Upload folder version
       uses: actions/upload-artifact@v4
@@ -100,9 +105,73 @@ jobs:
       run: |
         pyinstaller --name "WoW自动钓鱼" --onefile --windowed main.py
     
+    - name: Compress macOS version
+      run: |
+        cd dist && zip -r "WoW自动钓鱼-macOS.zip" "WoW自动钓鱼"
+    
     - name: Upload artifact
       uses: actions/upload-artifact@v4
       with:
         name: WoW-AutoFishing-macOS
-        path: dist/*
+        path: dist/*.zip
         retention-days: 30
+
+  # 创建 Release（仅在 tag 推送时触发）
+  release:
+    needs: [build-windows, build-macos]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Download Windows single file
+      uses: actions/download-artifact@v4
+      with:
+        name: WoW-AutoFishing-Windows-单文件版
+        path: release/
+    
+    - name: Download Windows folder version
+      uses: actions/download-artifact@v4
+      with:
+        name: WoW-AutoFishing-Windows-文件夹版
+        path: release/
+    
+    - name: Download macOS version
+      uses: actions/download-artifact@v4
+      with:
+        name: WoW-AutoFishing-macOS
+        path: release/
+    
+    - name: List release files
+      run: ls -la release/
+    
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        name: ${{ github.ref_name }}
+        draft: false
+        prerelease: false
+        files: |
+          release/*
+        body: |
+          ## WoW 自动钓鱼工具 ${{ github.ref_name }}
+          
+          ### 下载说明
+          
+          | 文件 | 说明 |
+          |------|------|
+          | `WoW自动钓鱼-Windows-单文件版.exe` | Windows 单文件版，直接运行 |
+          | `WoW自动钓鱼-Windows-文件夹版.zip` | Windows 文件夹版，解压后运行（更稳定） |
+          | `WoW自动钓鱼-macOS.zip` | macOS 版，解压后运行 |
+          
+          ### Windows 使用前提
+          - 需要启用「立体声混音」来捕获游戏声音
+          - 如果遇到 DLL 错误，请使用「文件夹版」
+          
+          ### macOS 使用前提
+          - 需要安装 BlackHole 虚拟音频设备
+          - 需要在「系统偏好设置 → 隐私 → 辅助功能」中授权
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
