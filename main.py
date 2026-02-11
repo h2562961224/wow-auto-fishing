@@ -25,7 +25,7 @@ def main():
     
     app = QApplication(sys.argv)
     app.setApplicationName("WoW 自动钓鱼工具")
-    app.setApplicationVersion("1.0.0")
+    app.setApplicationVersion("1.0.1")
     
     # 创建并显示主窗口
     window = MainWindow()

@@ -637,9 +637,26 @@ class MainWindow(QMainWindow):
         self._rate_label.setText(f"{stats.success_rate:.1f}%")
         self._bait_label.setText(str(stats.baits_applied))
     
+    # 日志最大行数，超过后自动清理旧日志
+    _MAX_LOG_LINES = 500
+
     def _on_log_received(self, message: str) -> None:
         """日志接收回调"""
         self._log_text.append(message)
+        
+        # 限制日志行数，防止长时间运行内存持续增长
+        doc = self._log_text.document()
+        if doc.blockCount() > self._MAX_LOG_LINES:
+            cursor = self._log_text.textCursor()
+            cursor.movePosition(cursor.MoveOperation.Start)
+            # 删除最早的多余行
+            lines_to_remove = doc.blockCount() - self._MAX_LOG_LINES
+            for _ in range(lines_to_remove):
+                cursor.movePosition(cursor.MoveOperation.Down, cursor.MoveMode.KeepAnchor)
+            cursor.movePosition(cursor.MoveOperation.StartOfBlock, cursor.MoveMode.KeepAnchor)
+            cursor.removeSelectedText()
+            cursor.deleteChar()  # 删除残留的空行
+        
         # 滚动到底部
         scrollbar = self._log_text.verticalScrollBar()
         scrollbar.setValue(scrollbar.maximum())

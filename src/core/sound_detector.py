@@ -72,6 +72,10 @@ class SoundDetector:
         self._last_trigger_time = 0
         self._trigger_cooldown = 1.0  # 触发冷却时间（秒）
         
+        # 回调通知事件和线程（避免每次触发都创建新线程）
+        self._callback_event = threading.Event()
+        self._callback_thread: Optional[threading.Thread] = None
+        
         # 当前音量（用于 UI 显示）
         self._current_volume = 0.0
         
@@ -246,9 +250,21 @@ class SoundDetector:
             current_time - self._last_trigger_time > self._trigger_cooldown):
             self._last_trigger_time = current_time
             if self._callback:
-                # 在新线程中调用回调，避免阻塞音频流
-                threading.Thread(target=self._callback, daemon=True).start()
+                # 通过事件通知回调线程，避免每次都创建新线程
+                self._callback_event.set()
     
+    def _callback_loop(self) -> None:
+        """回调线程主循环，等待事件通知后执行回调"""
+        while self._running:
+            # 等待触发事件，每 0.5 秒检查一次是否应该退出
+            if self._callback_event.wait(timeout=0.5):
+                self._callback_event.clear()
+                if self._running and self._callback:
+                    try:
+                        self._callback()
+                    except Exception as e:
+                        print(f"回调执行失败: {e}")
+
     def start(self) -> bool:
         """
         开始监听
@@ -290,6 +306,14 @@ class SoundDetector:
             self._running = True
             self._device_index = device
             self._device_name = device_name
+            
+            # 启动回调通知线程（单个长驻线程，避免反复创建短生命周期线程）
+            self._callback_event.clear()
+            self._callback_thread = threading.Thread(
+                target=self._callback_loop, daemon=True
+            )
+            self._callback_thread.start()
+            
             print(f"声音检测已启动，设备: {device_name} (索引: {device})")
             return True
         except Exception as e:
@@ -301,6 +325,12 @@ class SoundDetector:
     def stop(self) -> None:
         """停止监听"""
         self._running = False
+        
+        # 唤醒回调线程使其退出
+        self._callback_event.set()
+        if self._callback_thread and self._callback_thread.is_alive():
+            self._callback_thread.join(timeout=2)
+        self._callback_thread = None
         
         if self._stream:
             try:

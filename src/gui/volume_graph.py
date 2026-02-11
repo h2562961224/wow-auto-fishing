@@ -31,8 +31,9 @@ class VolumeGraph(QWidget):
         self._max_volume = 0.1  # Y轴最大值，会自动调整
         self._auto_scale = True
         
-        # 触发标记
-        self._trigger_points = deque(maxlen=50)  # 记录触发时刻的索引
+        # 触发标记：使用全局计数器跟踪，避免索引漂移问题
+        self._total_points_added = 0  # 已添加的总数据点数
+        self._trigger_points = deque(maxlen=50)  # 记录触发时刻的全局计数器值
         
         # 颜色
         self._bg_color = QColor(30, 30, 30)
@@ -63,6 +64,7 @@ class VolumeGraph(QWidget):
     def add_volume(self, volume: float) -> None:
         """添加音量数据点"""
         self._volumes.append(volume)
+        self._total_points_added += 1
         
         # 自动调整Y轴范围
         if self._auto_scale and volume > self._max_volume * 0.8:
@@ -72,14 +74,16 @@ class VolumeGraph(QWidget):
     
     def mark_trigger(self) -> None:
         """标记触发点"""
-        self._trigger_points.append(len(self._volumes) - 1)
+        self._trigger_points.append(self._total_points_added - 1)
     
     def clear(self) -> None:
         """清空数据"""
         self._volumes.clear()
         self._trigger_points.clear()
+        self._total_points_added = 0
         for _ in range(self._max_points):
             self._volumes.append(0)
+        self._total_points_added = self._max_points
         self._max_volume = 0.1
         self.update()
     
@@ -96,6 +100,13 @@ class VolumeGraph(QWidget):
     def paintEvent(self, event) -> None:
         """绘制事件"""
         painter = QPainter(self)
+        try:
+            self._do_paint(painter)
+        finally:
+            painter.end()
+
+    def _do_paint(self, painter: QPainter) -> None:
+        """实际绘制逻辑"""
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         
         width = self.width()
@@ -167,10 +178,11 @@ class VolumeGraph(QWidget):
         
         # 绘制触发标记
         painter.setPen(QPen(self._trigger_color, 2))
-        current_idx = len(self._volumes)
-        for trigger_idx in self._trigger_points:
-            # 计算相对位置
-            relative_idx = trigger_idx - (current_idx - self._max_points)
+        # 当前窗口起始的全局计数器值
+        window_start = self._total_points_added - self._max_points
+        for trigger_counter in self._trigger_points:
+            # 计算触发点在当前窗口中的相对位置
+            relative_idx = trigger_counter - window_start
             if 0 <= relative_idx < self._max_points:
                 x = margin_left + int(relative_idx * graph_width / self._max_points)
                 painter.drawLine(x, margin_top, x, margin_top + graph_height)
